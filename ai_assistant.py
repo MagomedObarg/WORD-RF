@@ -9,27 +9,36 @@ logger = logging.getLogger(__name__)
 
 class AIAssistant:
     def __init__(self, api_key: str, model_name: str = "gemini-pro", temperature: float = 0.7):
-        self.api_key = api_key
-        self.model_name = model_name
+        self.api_key = (api_key or "").strip()
+        self.model_name = model_name.strip() if isinstance(model_name, str) and model_name.strip() else "gemini-pro"
         self.temperature = temperature
         self.model = None
         self.chat_history = []
         self.is_configured = False
         
-        if api_key and api_key != "YOUR_GEMINI_API_KEY_HERE":
+        # Validate API key more strictly
+        if self.api_key and self.api_key != "YOUR_GEMINI_API_KEY_HERE":
             try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(model_name)
+                genai.configure(api_key=self.api_key)
+                self.model = genai.GenerativeModel(self.model_name)
                 self.is_configured = True
                 logger.info("AI Assistant initialized successfully")
             except Exception as e:
                 logger.error(f"Failed to initialize AI Assistant: {e}")
                 self.is_configured = False
+        else:
+            logger.warning("AI Assistant not configured: Invalid or missing API key")
     
     def is_ready(self) -> bool:
         return self.is_configured and self.model is not None
     
     def generate_async(self, prompt: str, callback: Callable[[str, Optional[str]], None]):
+        if not self.is_ready():
+            error_msg = "AI Assistant is not properly configured"
+            logger.error(error_msg)
+            callback("", error_msg)
+            return
+        
         def task():
             try:
                 response = self.model.generate_content(
