@@ -112,6 +112,7 @@ class TextEditor(ctk.CTk):
                 command=command,
                 width=100,
                 fg_color="transparent",
+                text_color=("gray10", "gray90"),
                 hover_color=("gray70", "gray30")
             )
             btn.pack(side="left", padx=5)
@@ -122,6 +123,7 @@ class TextEditor(ctk.CTk):
             command=self.toggle_theme,
             width=40,
             fg_color="transparent",
+            text_color=("gray10", "gray90"),
             hover_color=("gray70", "gray30")
         )
         theme_btn.pack(side="right", padx=5)
