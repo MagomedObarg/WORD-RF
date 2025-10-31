@@ -50,13 +50,26 @@ config.ini
 .coverage
 htmlcov/
 
-# User documents
+# User documents (exclude user-created files but keep documentation)
 *.txt
 *.docx
 *.pdf
 *.md
 *.html
 !requirements.txt
+!README.md
+!QUICKSTART.md
+!SETUP_GUIDE.md
+!EXAMPLES.md
+!FAQ.md
+!ARCHITECTURE.md
+!CONTRIBUTING.md
+!PROJECT_STRUCTURE.md
+!CODE_STATS.md
+!CHANGELOG.md
+!FILES.md
+!PROJECT_SUMMARY.md
+!IMPROVEMENT_IDEAS.md
 
 # Temporary files
 *.tmp
