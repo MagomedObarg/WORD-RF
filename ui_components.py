@@ -8,36 +8,73 @@ class AIPanel(ctk.CTkFrame):
         super().__init__(parent, width=300)
         self.ai_callback = ai_callback
         self.is_visible = True
+        self.message_count = 0
+        self.has_history = False
+        self.placeholder_active = False
         
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        header_frame.grid_columnconfigure(0, weight=1)
+        
         header = ctk.CTkLabel(
-            self, 
+            header_frame, 
             text="🤖 AI Ассистент",
             font=ctk.CTkFont(size=16, weight="bold")
         )
-        header.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        header.grid(row=0, column=0, sticky="w")
         
-        self.chat_display = ctk.CTkTextbox(self, wrap="word")
+        self.message_count_label = ctk.CTkLabel(
+            header_frame,
+            text="",
+            font=ctk.CTkFont(size=10),
+            text_color=("gray50", "gray60")
+        )
+        self.message_count_label.grid(row=0, column=1, sticky="e", padx=(5, 0))
+        
+        self.chat_display = ctk.CTkTextbox(
+            self, 
+            wrap="word",
+            font=ctk.CTkFont(size=12),
+            corner_radius=8
+        )
         self.chat_display.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self.chat_display.configure(state="disabled")
         
-        input_frame = ctk.CTkFrame(self)
+        self.system_message_font = ctk.CTkFont(size=11, slant="italic")
+        self.chat_display.tag_config("user", justify="right", foreground=("#1B4F72", "#AED6F1"), spacing1=4, spacing3=4)
+        self.chat_display.tag_config("ai", justify="left", foreground=("#145A32", "#A9DFBF"), spacing1=4, spacing3=4)
+        self.chat_display.tag_config("system", justify="center", foreground=("gray40", "gray70"), font=self.system_message_font, spacing1=6, spacing3=6)
+        
+        input_frame = ctk.CTkFrame(self, fg_color="transparent")
         input_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
         input_frame.grid_columnconfigure(0, weight=1)
         
-        self.chat_input = ctk.CTkEntry(input_frame, placeholder_text="Спросите AI...")
+        self.chat_input = ctk.CTkEntry(
+            input_frame, 
+            placeholder_text="Спросите AI...",
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=12)
+        )
         self.chat_input.grid(row=0, column=0, padx=(0, 5), pady=5, sticky="ew")
         self.chat_input.bind("<Return>", lambda e: self.send_message())
+        self.chat_input.bind("<KeyRelease>", lambda e: self.update_send_button_state())
         
         send_btn = ctk.CTkButton(
             input_frame,
             text="➤",
-            width=40,
-            command=self.send_message
+            width=50,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=16),
+            command=self.send_message,
+            state="disabled"
         )
         send_btn.grid(row=0, column=1, pady=5)
+        self.send_btn = send_btn
         
         actions_label = ctk.CTkLabel(
             self,
@@ -65,49 +102,123 @@ class AIPanel(ctk.CTkFrame):
                 actions_frame,
                 text=label,
                 command=lambda a=action: self.quick_action(a),
-                height=28,
-                font=ctk.CTkFont(size=11)
+                height=32,
+                corner_radius=6,
+                font=ctk.CTkFont(size=11),
+                hover_color=("#3498db", "#2980b9")
             )
             btn.grid(row=idx // 2, column=idx % 2, padx=5, pady=5, sticky="ew")
         
         actions_frame.grid_columnconfigure(0, weight=1)
         actions_frame.grid_columnconfigure(1, weight=1)
         
-        clear_btn = ctk.CTkButton(
+        separator = ctk.CTkFrame(self, height=2, fg_color=("gray70", "gray30"))
+        separator.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
+        
+        self.clear_btn = ctk.CTkButton(
             self,
             text="🗑️ Очистить историю",
-            command=self.clear_history,
-            fg_color="transparent",
-            border_width=1
+            command=self.confirm_clear_history,
+            fg_color=("#e74c3c", "#c0392b"),
+            hover_color=("#c0392b", "#a93226"),
+            text_color="white",
+            height=32,
+            font=ctk.CTkFont(size=12)
         )
-        clear_btn.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="ew")
+        self.clear_btn.grid(row=6, column=0, padx=10, pady=(0, 10), sticky="ew")
+        
+        self.update_send_button_state()
+        self.update_clear_button_state()
+        self.update_message_count_label()
+        self.show_empty_state()
     
     def send_message(self):
         message = self.chat_input.get().strip()
-        if message:
-            self.add_message(f"Вы: {message}", "user")
-            self.chat_input.delete(0, 'end')
+        if not message:
+            return
+        self.add_message(message, "user")
+        self.chat_input.delete(0, 'end')
+        self.update_send_button_state()
+        if callable(self.ai_callback):
             self.ai_callback("chat", message)
     
     def quick_action(self, action: str):
-        self.ai_callback(action, None)
+        if callable(self.ai_callback):
+            self.ai_callback(action, None)
     
     def add_message(self, message: str, sender: str = "ai"):
+        message = message.strip()
+        if not message:
+            return
         self.chat_display.configure(state="normal")
-        
+        existing_content = self.chat_display.get("1.0", "end-1c").strip()
+        if existing_content:
+            self.chat_display.insert("end", "\n\n")
+        tag = "system"
+        formatted_message = message
         if sender == "user":
-            self.chat_display.insert("end", f"\n{message}\n", "user")
+            formatted_message = f"🙋 Вы: {message}"
+            tag = "user"
+            self.message_count += 1
         elif sender == "ai":
-            self.chat_display.insert("end", f"\n🤖 AI: {message}\n", "ai")
-        elif sender == "system":
-            self.chat_display.insert("end", f"\n⚠️ {message}\n", "system")
-        
+            formatted_message = f"🤖 AI: {message}"
+            tag = "ai"
+            self.message_count += 1
+        else:
+            if not message.startswith(("ℹ", "⚠", "✅", "💡", "🗑")):
+                formatted_message = f"ℹ️ {message}"
+        self.chat_display.insert("end", formatted_message, tag)
         self.chat_display.see("end")
         self.chat_display.configure(state="disabled")
+        self.has_history = self.message_count > 0
+        self.update_message_count_label()
+        self.update_clear_button_state()
+        self.update_send_button_state()
+    
+    def confirm_clear_history(self):
+        from tkinter import messagebox
+        result = messagebox.askyesno(
+            "Подтверждение",
+            "Вы уверены, что хотите очистить историю чата?\nЭто действие нельзя отменить.",
+            icon='warning'
+        )
+        if result:
+            self.clear_history()
     
     def clear_history(self):
         self.chat_display.configure(state="normal")
         self.chat_display.delete("1.0", "end")
+        self.chat_display.configure(state="disabled")
+        self.message_count = 0
+        self.has_history = False
+        self.update_message_count_label()
+        self.update_clear_button_state()
+    
+    def update_message_count_label(self):
+        if self.message_count > 0:
+            self.message_count_label.configure(text=f"({self.message_count} сообщений)")
+        else:
+            self.message_count_label.configure(text="")
+    
+    def update_clear_button_state(self):
+        if self.has_history:
+            self.clear_btn.configure(state="normal")
+        else:
+            self.clear_btn.configure(state="disabled")
+    
+    def update_send_button_state(self):
+        message = self.chat_input.get().strip()
+        if message:
+            self.send_btn.configure(state="normal")
+        else:
+            self.send_btn.configure(state="disabled")
+    
+    def show_empty_state(self):
+        self.chat_display.configure(state="normal")
+        self.chat_display.delete("1.0", "end")
+        empty_message = "👋 Привет! Я ваш AI-ассистент.\n\nЗадайте мне вопрос или используйте быстрые действия ниже."
+        self.chat_display.insert("1.0", empty_message)
+        self.chat_display.tag_add("system", "1.0", "end")
         self.chat_display.configure(state="disabled")
     
     def toggle_visibility(self):
