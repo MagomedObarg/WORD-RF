@@ -3,12 +3,15 @@ from tkinter import filedialog, messagebox, colorchooser
 import tkinter.font as tkfont
 from ai_assistant import AIAssistant
 from file_operations import FileOperations
-from ui_components import AIPanel, FormattingToolbar, StatusBar, TemplateDialog
+from ui_components import (AIPanel, FormattingToolbar, StatusBar, TemplateDialog,
+                           StyleDialog, SettingsDialog, KeyboardShortcutsDialog,
+                           WelcomeDialog, ProgressDialog)
 import configparser
 import os
 import logging
 import time
 import threading
+import json
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,12 +32,20 @@ class TextEditor(ctk.CTk):
         self.undo_stack = []
         self.redo_stack = []
         self.autosave_timer = None
+        self.recent_files = []
+        self.zoom_level = 1.0
+        self.base_font_size = 12
+        self.progress_dialog = None
+        self.is_fullscreen = False
         
         self.load_config()
+        self.load_recent_files()
         self.setup_ai()
         self.setup_ui()
         self.setup_bindings()
         self.start_autosave()
+        
+        self.after(500, self.show_welcome_if_needed)
         
         logger.info("Text Editor initialized")
     
@@ -89,6 +100,8 @@ class TextEditor(ctk.CTk):
             ("✏️ Правка", self.show_edit_menu),
             ("🎨 Формат", self.show_format_menu),
             ("🤖 AI", self.show_ai_menu),
+            ("🔍 Вид", self.show_view_menu),
+            ("⚙️ Настройки", self.show_settings),
             ("❓ Справка", self.show_help_menu)
         ]
         
@@ -102,6 +115,17 @@ class TextEditor(ctk.CTk):
                 hover_color=("gray70", "gray30")
             )
             btn.pack(side="left", padx=5)
+        
+        theme_btn = ctk.CTkButton(
+            menubar,
+            text="🌙",
+            command=self.toggle_theme,
+            width=40,
+            fg_color="transparent",
+            hover_color=("gray70", "gray30")
+        )
+        theme_btn.pack(side="right", padx=5)
+        self.theme_btn = theme_btn
     
     def setup_toolbar(self):
         formatting_callbacks = {
@@ -152,17 +176,26 @@ class TextEditor(ctk.CTk):
     
     def setup_bindings(self):
         self.bind('<Control-s>', lambda e: self.save_file())
+        self.bind('<Control-S>', lambda e: self.save_file_as())
         self.bind('<Control-o>', lambda e: self.open_file())
         self.bind('<Control-n>', lambda e: self.new_file())
         self.bind('<Control-z>', lambda e: self.undo())
         self.bind('<Control-y>', lambda e: self.redo())
         self.bind('<Control-f>', lambda e: self.find_replace())
         self.bind('<Control-Shift-A>', lambda e: self.show_ai_menu())
+        self.bind('<Control-i>', lambda e: self.ai_action("improve"))
+        self.bind('<Control-r>', lambda e: self.show_rewrite_dialog())
+        self.bind('<Control-plus>', lambda e: self.zoom_in())
+        self.bind('<Control-equal>', lambda e: self.zoom_in())
+        self.bind('<Control-minus>', lambda e: self.zoom_out())
+        self.bind('<Control-0>', lambda e: self.reset_zoom())
+        self.bind('<F11>', lambda e: self.toggle_fullscreen())
+        self.bind('<F1>', lambda e: KeyboardShortcutsDialog(self))
     
     def show_file_menu(self):
         menu = ctk.CTkToplevel(self)
         menu.title("Файл")
-        menu.geometry("200x250")
+        menu.geometry("250x350")
         menu.transient(self)
         
         options = [
@@ -171,7 +204,8 @@ class TextEditor(ctk.CTk):
             ("💾 Сохранить", self.save_file),
             ("💾 Сохранить как", self.save_file_as),
             ("📤 Экспорт в PDF", self.export_pdf),
-            ("❌ Выход", self.quit)
+            ("📤 Экспорт в Markdown", self.export_markdown),
+            ("📤 Экспорт в HTML", self.export_html),
         ]
         
         for text, command in options:
@@ -181,6 +215,20 @@ class TextEditor(ctk.CTk):
                 command=lambda c=command, m=menu: (c(), m.destroy())
             )
             btn.pack(padx=10, pady=5, fill="x")
+        
+        if self.recent_files:
+            ctk.CTkLabel(menu, text="Недавние файлы:", font=ctk.CTkFont(weight="bold")).pack(padx=10, pady=(10, 5))
+            for i, file in enumerate(self.recent_files[:3]):
+                btn = ctk.CTkButton(
+                    menu,
+                    text=f"{i+1}. {os.path.basename(file)}",
+                    command=lambda f=file, m=menu: (self.open_recent_file(f), m.destroy()),
+                    fg_color="transparent",
+                    border_width=1
+                )
+                btn.pack(padx=10, pady=2, fill="x")
+        
+        ctk.CTkButton(menu, text="❌ Выход", command=self.quit, fg_color="red").pack(padx=10, pady=10, fill="x")
     
     def show_edit_menu(self):
         menu = ctk.CTkToplevel(self)
@@ -256,34 +304,67 @@ class TextEditor(ctk.CTk):
             )
             btn.pack(padx=10, pady=5, fill="x")
     
-    def show_help_menu(self):
-        help_text = """
-AI Text Editor - Помощь
-
-Горячие клавиши:
-• Ctrl+S - Сохранить
-• Ctrl+O - Открыть
-• Ctrl+N - Новый документ
-• Ctrl+Z - Отменить
-• Ctrl+Y - Повторить
-• Ctrl+F - Найти и заменить
-• Ctrl+Shift+A - Меню AI
-
-AI Функции:
-• Улучшение текста
-• Переписывание в разных стилях
-• Продолжение текста
-• Исправление грамматики
-• Перевод на другие языки
-• Создание документов
-
-Настройка API ключа:
-1. Получите ключ на ai.google.dev
-2. Добавьте в config.ini
-3. Перезапустите приложение
-        """
+    def show_view_menu(self):
+        menu = ctk.CTkToplevel(self)
+        menu.title("Вид")
+        menu.geometry("250x250")
+        menu.transient(self)
         
-        messagebox.showinfo("Справка", help_text)
+        options = [
+            ("➕ Увеличить (Ctrl++)", self.zoom_in),
+            ("➖ Уменьшить (Ctrl+-)", self.zoom_out),
+            ("🔄 Сбросить масштаб (Ctrl+0)", self.reset_zoom),
+            ("⬛ Полный экран (F11)", self.toggle_fullscreen),
+            ("📋 Панель AI", self.toggle_ai_panel),
+        ]
+        
+        for text, command in options:
+            btn = ctk.CTkButton(
+                menu,
+                text=text,
+                command=lambda c=command, m=menu: (c(), m.destroy())
+            )
+            btn.pack(padx=10, pady=5, fill="x")
+    
+    def show_help_menu(self):
+        menu = ctk.CTkToplevel(self)
+        menu.title("Справка")
+        menu.geometry("250x200")
+        menu.transient(self)
+        
+        options = [
+            ("⌨️ Горячие клавиши (F1)", lambda: KeyboardShortcutsDialog(self)),
+            ("👋 Приветствие", lambda: WelcomeDialog(self, self.show_settings)),
+            ("ℹ️ О программе", self.show_about),
+        ]
+        
+        for text, command in options:
+            btn = ctk.CTkButton(
+                menu,
+                text=text,
+                command=lambda c=command, m=menu: (c(), m.destroy())
+            )
+            btn.pack(padx=10, pady=5, fill="x")
+    
+    def show_about(self):
+        about_text = """
+🤖 AI Text Editor - Gemini
+Версия 1.0.0
+
+Современный текстовый редактор с AI-ассистентом
+на базе Google Gemini.
+
+Возможности:
+• Умное редактирование текста
+• AI-генерация и улучшение
+• Поддержка множества форматов
+• Богатое форматирование
+
+Разработано с ❤️ и AI
+
+© 2024 AI Text Editor Team
+        """
+        messagebox.showinfo("О программе", about_text)
     
     def show_context_menu(self, event):
         if not self.ai_assistant.is_ready():
@@ -350,6 +431,7 @@ AI Функции:
                 self.is_modified = False
                 self.title(f"AI Text Editor - {os.path.basename(filepath)}")
                 self.statusbar.set_save_status("✓ Файл загружен")
+                self.add_recent_file(filepath)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось открыть файл: {e}")
     
@@ -562,6 +644,7 @@ AI Функции:
             messagebox.showinfo("Пустой текст", "Нет текста для обработки")
             return
         
+        self.show_progress("🤖 AI обрабатывает ваш текст...")
         self.statusbar.set_ai_status("🤖 AI обрабатывает...")
         
         action_map = {
@@ -619,6 +702,7 @@ AI Функции:
             self.ai_panel.add_message(response, "ai")
     
     def handle_ai_text_response(self, response: str, error: Optional[str]):
+        self.hide_progress()
         self.statusbar.set_ai_status("")
         
         if error:
@@ -636,6 +720,7 @@ AI Функции:
             self.ai_panel.add_message("Текст обработан успешно", "ai")
     
     def handle_ai_document_response(self, response: str, error: Optional[str]):
+        self.hide_progress()
         self.statusbar.set_ai_status("")
         
         if error:
@@ -658,6 +743,176 @@ AI Функции:
             self.autosave_timer = self.after(interval * 1000, autosave)
         
         self.autosave_timer = self.after(interval * 1000, autosave)
+    
+    def load_recent_files(self):
+        recent_file_path = os.path.join(os.path.dirname(__file__), 'recent_files.json')
+        if os.path.exists(recent_file_path):
+            try:
+                with open(recent_file_path, 'r', encoding='utf-8') as f:
+                    self.recent_files = json.load(f)
+            except:
+                self.recent_files = []
+    
+    def save_recent_files(self):
+        recent_file_path = os.path.join(os.path.dirname(__file__), 'recent_files.json')
+        try:
+            with open(recent_file_path, 'w', encoding='utf-8') as f:
+                json.dump(self.recent_files[:10], f)
+        except:
+            pass
+    
+    def add_recent_file(self, filepath: str):
+        if filepath in self.recent_files:
+            self.recent_files.remove(filepath)
+        self.recent_files.insert(0, filepath)
+        self.save_recent_files()
+    
+    def open_recent_file(self, filepath: str):
+        if os.path.exists(filepath):
+            try:
+                ext = FileOperations.get_file_extension(filepath)
+                if ext == '.txt':
+                    content = FileOperations.open_txt(filepath)
+                elif ext == '.docx':
+                    content = FileOperations.open_docx(filepath)
+                else:
+                    content = FileOperations.open_txt(filepath)
+                
+                self.text_editor.delete("1.0", "end")
+                self.text_editor.insert("1.0", content)
+                self.current_file = filepath
+                self.is_modified = False
+                self.title(f"AI Text Editor - {os.path.basename(filepath)}")
+                self.statusbar.set_save_status("✓ Файл загружен")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось открыть файл: {e}")
+        else:
+            messagebox.showerror("Ошибка", "Файл не найден")
+            self.recent_files.remove(filepath)
+            self.save_recent_files()
+    
+    def export_markdown(self):
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            filetypes=[("Markdown Files", "*.md")]
+        )
+        if filepath:
+            try:
+                content = self.text_editor.get("1.0", "end-1c")
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                messagebox.showinfo("Успех", "Markdown файл сохранен")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось экспортировать: {e}")
+    
+    def export_html(self):
+        filepath = filedialog.asksaveasfilename(
+            defaultextension=".html",
+            filetypes=[("HTML Files", "*.html")]
+        )
+        if filepath:
+            try:
+                content = self.text_editor.get("1.0", "end-1c")
+                html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Document</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; }}
+    </style>
+</head>
+<body>
+    <pre>{content}</pre>
+</body>
+</html>"""
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                messagebox.showinfo("Успех", "HTML файл сохранен")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось экспортировать: {e}")
+    
+    def zoom_in(self):
+        self.zoom_level = min(3.0, self.zoom_level + 0.1)
+        self.apply_zoom()
+    
+    def zoom_out(self):
+        self.zoom_level = max(0.5, self.zoom_level - 0.1)
+        self.apply_zoom()
+    
+    def reset_zoom(self):
+        self.zoom_level = 1.0
+        self.apply_zoom()
+    
+    def apply_zoom(self):
+        new_size = int(self.base_font_size * self.zoom_level)
+        self.text_editor.configure(font=ctk.CTkFont(size=new_size))
+        self.statusbar.set_save_status(f"Масштаб: {int(self.zoom_level * 100)}%")
+        self.after(1000, lambda: self.statusbar.set_save_status(""))
+    
+    def toggle_fullscreen(self):
+        self.is_fullscreen = not self.is_fullscreen
+        self.attributes("-fullscreen", self.is_fullscreen)
+    
+    def toggle_theme(self):
+        current_mode = ctk.get_appearance_mode()
+        new_mode = "dark" if current_mode == "Light" else "light"
+        ctk.set_appearance_mode(new_mode)
+        self.theme_btn.configure(text="☀️" if new_mode == "dark" else "🌙")
+        self.config.set('EDITOR', 'theme', new_mode)
+        self.save_config()
+    
+    def show_settings(self):
+        SettingsDialog(self, self.config, self.apply_settings)
+    
+    def apply_settings(self):
+        self.save_config()
+        theme = self.config.get('EDITOR', 'theme', fallback='light')
+        ctk.set_appearance_mode(theme)
+        self.base_font_size = int(self.config.get('EDITOR', 'default_font_size', fallback='12'))
+        self.apply_zoom()
+        self.setup_ai()
+        messagebox.showinfo("Настройки", "Настройки сохранены и применены")
+    
+    def save_config(self):
+        config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+        with open(config_path, 'w') as f:
+            self.config.write(f)
+    
+    def show_rewrite_dialog(self):
+        try:
+            selected_text = self.text_editor.get("sel.first", "sel.last")
+            if not selected_text.strip():
+                messagebox.showinfo("Выделите текст", "Пожалуйста, выделите текст для переписывания")
+                return
+            
+            def apply_rewrite(style):
+                self.show_progress("🤖 AI переписывает текст...")
+                self.ai_assistant.rewrite_text(selected_text, style, self.handle_ai_text_response)
+            
+            StyleDialog(self, apply_rewrite)
+        except:
+            messagebox.showinfo("Выделите текст", "Пожалуйста, выделите текст для переписывания")
+    
+    def show_progress(self, message: str):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+        self.progress_dialog = ProgressDialog(self, message)
+    
+    def hide_progress(self):
+        if self.progress_dialog:
+            self.progress_dialog.close()
+            self.progress_dialog = None
+    
+    def show_welcome_if_needed(self):
+        welcome_file = os.path.join(os.path.dirname(__file__), '.welcome_shown')
+        if not os.path.exists(welcome_file):
+            WelcomeDialog(self, self.show_settings)
+            try:
+                with open(welcome_file, 'w') as f:
+                    f.write('1')
+            except:
+                pass
     
     def quit(self):
         if self.is_modified:

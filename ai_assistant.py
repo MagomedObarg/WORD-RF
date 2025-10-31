@@ -63,7 +63,8 @@ class AIAssistant:
             "formal": "формальном деловом",
             "informal": "неформальном дружеском",
             "business": "деловом профессиональном",
-            "creative": "творческом креативном"
+            "creative": "творческом креативном",
+            "academic": "академическом научном"
         }
         style_desc = styles.get(style, "нейтральном")
         

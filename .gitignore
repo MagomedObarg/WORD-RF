@@ -54,9 +54,15 @@ htmlcov/
 *.txt
 *.docx
 *.pdf
+*.md
+*.html
 !requirements.txt
 
 # Temporary files
 *.tmp
 *.bak
 .cache/
+
+# User preferences
+recent_files.json
+.welcome_shown
