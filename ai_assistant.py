@@ -8,10 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 class AIAssistant:
-    def __init__(self, api_key: str, model_name: str = "gemini-pro", temperature: float = 0.7):
+    def __init__(self, api_key: str, model_name: str = "gemini-pro", temperature: float = 0.7, max_tokens: int = 2048):
         self.api_key = (api_key or "").strip()
         self.model_name = model_name.strip() if isinstance(model_name, str) and model_name.strip() else "gemini-pro"
-        self.temperature = temperature
+        self.temperature = float(temperature) if isinstance(temperature, (int, float, str)) else 0.7
+        try:
+            self.max_tokens = max(1, int(max_tokens))
+        except (ValueError, TypeError):
+            self.max_tokens = 2048
         self.model = None
         self.chat_history = []
         self.is_configured = False
