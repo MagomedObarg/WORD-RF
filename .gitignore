@@ -70,6 +70,7 @@ htmlcov/
 !FILES.md
 !PROJECT_SUMMARY.md
 !IMPROVEMENT_IDEAS.md
+!FIX_EMPTY_URL_PARSE.md
 
 # Temporary files
 *.tmp
