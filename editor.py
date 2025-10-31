@@ -51,10 +51,10 @@ class TextEditor(ctk.CTk):
     
     def load_config(self):
         self.config = configparser.ConfigParser()
-        config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+        self.config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
         
-        if os.path.exists(config_path):
-            self.config.read(config_path)
+        if os.path.exists(self.config_path):
+            self.config.read(self.config_path)
         else:
             self.config['API'] = {'gemini_api_key': 'YOUR_GEMINI_API_KEY_HERE'}
             self.config['AI_SETTINGS'] = {
@@ -65,18 +65,102 @@ class TextEditor(ctk.CTk):
             self.config['EDITOR'] = {
                 'autosave_interval': '60',
                 'default_font': 'Arial',
-                'default_font_size': '12',
-                'theme': 'light'
+                'default_font_size': '12'
             }
-            with open(config_path, 'w') as f:
-                self.config.write(f)
+            self.config['INTERFACE'] = {
+                'theme': 'light',
+                'ui_scale': '1.0',
+                'show_ai_panel': 'True',
+                'show_statusbar': 'True'
+            }
+            self.save_config()
+        
+        updated = False
+        
+        if 'API' not in self.config:
+            self.config['API'] = {'gemini_api_key': 'YOUR_GEMINI_API_KEY_HERE'}
+            updated = True
+        elif 'gemini_api_key' not in self.config['API']:
+            self.config['API']['gemini_api_key'] = 'YOUR_GEMINI_API_KEY_HERE'
+            updated = True
+        
+        if 'AI_SETTINGS' not in self.config:
+            self.config['AI_SETTINGS'] = {
+                'model': 'gemini-pro',
+                'temperature': '0.7',
+                'max_tokens': '2048'
+            }
+            updated = True
+        else:
+            if 'model' not in self.config['AI_SETTINGS']:
+                self.config['AI_SETTINGS']['model'] = 'gemini-pro'
+                updated = True
+            if 'temperature' not in self.config['AI_SETTINGS']:
+                self.config['AI_SETTINGS']['temperature'] = '0.7'
+                updated = True
+            if 'max_tokens' not in self.config['AI_SETTINGS']:
+                self.config['AI_SETTINGS']['max_tokens'] = '2048'
+                updated = True
+        
+        if 'EDITOR' not in self.config:
+            self.config['EDITOR'] = {
+                'autosave_interval': '60',
+                'default_font': 'Arial',
+                'default_font_size': '12'
+            }
+            updated = True
+        else:
+            if 'autosave_interval' not in self.config['EDITOR']:
+                self.config['EDITOR']['autosave_interval'] = '60'
+                updated = True
+            if 'default_font' not in self.config['EDITOR']:
+                self.config['EDITOR']['default_font'] = 'Arial'
+                updated = True
+            if 'default_font_size' not in self.config['EDITOR']:
+                self.config['EDITOR']['default_font_size'] = '12'
+                updated = True
+        
+        if 'INTERFACE' not in self.config:
+            self.config['INTERFACE'] = {
+                'theme': 'light',
+                'ui_scale': '1.0',
+                'show_ai_panel': 'True',
+                'show_statusbar': 'True'
+            }
+            updated = True
+        else:
+            if 'theme' not in self.config['INTERFACE']:
+                self.config['INTERFACE']['theme'] = 'light'
+                updated = True
+            if 'ui_scale' not in self.config['INTERFACE']:
+                self.config['INTERFACE']['ui_scale'] = '1.0'
+                updated = True
+            if 'show_ai_panel' not in self.config['INTERFACE']:
+                self.config['INTERFACE']['show_ai_panel'] = 'True'
+                updated = True
+            if 'show_statusbar' not in self.config['INTERFACE']:
+                self.config['INTERFACE']['show_statusbar'] = 'True'
+                updated = True
+        
+        if updated:
+            self.save_config()
+        
+        self.apply_theme_setting()
+        self.apply_ui_scale_setting()
     
     def setup_ai(self):
         api_key = self.config.get('API', 'gemini_api_key', fallback='')
         model = self.config.get('AI_SETTINGS', 'model', fallback='gemini-pro')
-        temperature = float(self.config.get('AI_SETTINGS', 'temperature', fallback='0.7'))
+        try:
+            temperature = float(self.config.get('AI_SETTINGS', 'temperature', fallback='0.7'))
+        except (ValueError, TypeError):
+            temperature = 0.7
+        try:
+            max_tokens = int(self.config.get('AI_SETTINGS', 'max_tokens', fallback='2048'))
+        except (ValueError, TypeError):
+            max_tokens = 2048
         
-        self.ai_assistant = AIAssistant(api_key, model, temperature)
+        self.ai_assistant = AIAssistant(api_key, model, temperature, max_tokens)
         
         if not self.ai_assistant.is_ready():
             logger.warning("AI Assistant not configured properly")
@@ -90,6 +174,8 @@ class TextEditor(ctk.CTk):
         self.setup_editor()
         self.setup_ai_panel()
         self.setup_statusbar()
+        self.apply_interface_visibility()
+        self.update_theme_button()
     
     def setup_menu(self):
         menubar = ctk.CTkFrame(self, height=40)
@@ -869,17 +955,59 @@ class TextEditor(ctk.CTk):
     
     def apply_settings(self):
         self.save_config()
-        theme = self.config.get('EDITOR', 'theme', fallback='light')
-        ctk.set_appearance_mode(theme)
+        self.apply_theme_setting()
+        self.apply_ui_scale_setting()
         self.base_font_size = int(self.config.get('EDITOR', 'default_font_size', fallback='12'))
         self.apply_zoom()
+        self.apply_interface_visibility()
         self.setup_ai()
         messagebox.showinfo("Настройки", "Настройки сохранены и применены")
     
     def save_config(self):
-        config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
-        with open(config_path, 'w') as f:
+        with open(self.config_path, 'w') as f:
             self.config.write(f)
+    
+    def apply_theme_setting(self):
+        theme = self.config.get('INTERFACE', 'theme', fallback='light')
+        if theme in ('light', 'dark', 'system'):
+            ctk.set_appearance_mode(theme)
+    
+    def apply_ui_scale_setting(self):
+        ui_scale_str = self.config.get('INTERFACE', 'ui_scale', fallback='1.0')
+        try:
+            ui_scale = float(ui_scale_str)
+            if 0.5 <= ui_scale <= 2.0:
+                ctk.set_widget_scaling(ui_scale)
+        except (ValueError, TypeError):
+            pass
+    
+    def apply_interface_visibility(self):
+        show_ai_panel = self.config.getboolean('INTERFACE', 'show_ai_panel', fallback=True)
+        self.set_ai_panel_visibility(show_ai_panel)
+        
+        show_statusbar = self.config.getboolean('INTERFACE', 'show_statusbar', fallback=True)
+        if show_statusbar:
+            self.statusbar.grid()
+        else:
+            self.statusbar.grid_remove()
+    
+    def set_ai_panel_visibility(self, visible: bool):
+        if visible:
+            self.ai_panel.grid()
+            self.ai_toggle_btn.configure(text="◀")
+        else:
+            self.ai_panel.grid_remove()
+            self.ai_toggle_btn.configure(text="▶")
+        self.ai_panel.is_visible = visible
+    
+    def update_theme_button(self):
+        if not hasattr(self, 'theme_btn'):
+            return
+        current_mode = ctk.get_appearance_mode().lower()
+        if current_mode == 'dark':
+            self.theme_btn.configure(text="☀️")
+        else:
+            self.theme_btn.configure(text="🌙")
     
     def show_rewrite_dialog(self):
         try:
